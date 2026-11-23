@@ -63,9 +63,7 @@ function toHex(text: string): string {
   return out;
 }
 
-// Badge ids must be unique per badge, not per list position: Phoenix caches
-// badge details by id, so index-based ids made every first badge show the
-// first badge the client had ever seen.
+// Phoenix caches badge details by id, so each image needs its own.
 function badgeId(uri: string): number {
   let hash = 2166136261;
   for (let i = 0; i < uri.length; i++) {
@@ -75,8 +73,7 @@ function badgeId(uri: string): number {
   return BADGE_ID_BASE + ((hash >>> 0) % 1_000_000_000);
 }
 
-// Route directory icons through the loader's badge-icon unwrap so the runtime
-// can size injected badge art before Phoenix draws it.
+// The runtime unwraps this URL and clamps the art to the static badge size.
 function badgeUrl(uri: string, animated = false): string {
   return `https://cdn.discordapp.com/badge-icons/phx_u_${toHex(uri)}${animated ? ".gif" : ".png"}`;
 }

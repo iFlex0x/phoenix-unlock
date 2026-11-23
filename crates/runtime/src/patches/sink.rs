@@ -21,6 +21,7 @@ use phoenix_ui::{
    encode,
    get_prop,
    mirror::Created,
+   prop,
    set_prop,
 };
 use phoenix_wire::Value;
@@ -88,15 +89,21 @@ fn restore_originals(ops: &mut [Op]) -> bool {
 
 /// Unwraps custom badge icon URLs encoded as `/badge-icons/phx_u_<hex>.png`
 /// (from `phoenix.discord.onResponse` plugins injecting entries into profile
-/// `badges[]`) back to their real `https://` image URI.
+/// `badges[]` and the badge directory) back to their real `https://` image URI.
+///
+/// The badge sheet draws animated art at 180 inside a 120 slot with negative
+/// margins. Unwrapped art keeps the static 120 size so small GIFs are not
+/// scaled up.
 fn unwrap_badge_uris(ops: &mut [Op]) -> bool {
    const MARKER: &str = "/badge-icons/phx_u_";
+   const BADGE_ART: i32 = 120;
    let mut changed = false;
    for op in ops {
       let (Op::Create { props, .. } | Op::Update { props, .. }) = op else {
          continue;
       };
-      for (key, value) in props {
+      let mut unwrapped = false;
+      for (key, value) in props.iter_mut() {
          if *key != Prop::URI {
             continue;
          }
@@ -110,7 +117,26 @@ fn unwrap_badge_uris(ops: &mut [Op]) -> bool {
          let hex = hex.split(['.', '?', '#']).next().unwrap_or(hex);
          if let Some(decoded) = decode_hex_url(hex) {
             *uri = decoded;
-            changed = true;
+            unwrapped = true;
+         }
+      }
+      if !unwrapped {
+         continue;
+      }
+      changed = true;
+      for (key, value) in props.iter_mut() {
+         let is_size = *key == prop!("width") || *key == Prop::HEIGHT;
+         match value {
+            Value::Rect(margin)
+               if *key == Prop::MARGIN && margin.iter().any(|side| *side < 0.0) =>
+            {
+               *margin = [0.0, 0.0, 0.0, 12.0];
+            },
+            Value::F64(size) if is_size && *size > f64::from(BADGE_ART) => {
+               *size = f64::from(BADGE_ART);
+            },
+            Value::I32(size) if is_size && *size > BADGE_ART => *size = BADGE_ART,
+            _ => {},
          }
       }
    }
