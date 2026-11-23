@@ -757,15 +757,19 @@ fn restore_originals(ops: &mut [Op]) -> bool {
 
 /// Unwraps custom badge icon URLs encoded as `/badge-icons/phx_u_<hex>.png`
 /// (from `phoenix.discord.onResponse` plugins injecting entries into profile
-/// `badges[]`) back to their real `https://` image URI.
+/// `badges[]` and the badge directory) back to their real `https://` image URI.
+/// Animated art is drawn at 180 by the native badge sheet; injected badges keep
+/// the static sheet's 120 so a small GIF does not get scaled up.
 fn unwrap_badge_uris(ops: &mut [Op]) -> bool {
    const MARKER: &str = "/badge-icons/phx_u_";
+   const BADGE_ART: f64 = 120.0;
    let mut changed = false;
    for op in ops {
       let (Op::Create { props, .. } | Op::Update { props, .. }) = op else {
          continue;
       };
-      for (key, value) in props {
+      let mut unwrapped = false;
+      for (key, value) in props.iter_mut() {
          if *key != Prop::URI {
             continue;
          }
@@ -780,6 +784,30 @@ fn unwrap_badge_uris(ops: &mut [Op]) -> bool {
          if let Some(decoded) = decode_hex_url(hex) {
             *uri = decoded;
             changed = true;
+            unwrapped = true;
+         }
+      }
+      if !unwrapped {
+         continue;
+      }
+      for (key, value) in props.iter_mut() {
+         if *key == Prop::MARGIN {
+            if let Value::Rect(margin) = value
+               && margin.iter().any(|side| *side < 0.0)
+            {
+               // The animated sheet pops 180 art out of a 120 slot with
+               // negative margins. Clamped art takes the static margin.
+               *value = Value::Rect([0.0, 0.0, 0.0, 12.0]);
+            }
+            continue;
+         }
+         if *key != Prop::named("width") && *key != Prop::HEIGHT {
+            continue;
+         }
+         match value {
+            Value::F64(size) if *size > BADGE_ART => *size = BADGE_ART,
+            Value::I32(size) if f64::from(*size) > BADGE_ART => *size = BADGE_ART as i32,
+            _ => {},
          }
       }
    }
