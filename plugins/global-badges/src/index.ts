@@ -1,10 +1,10 @@
 // @description Badges from other client mods, shown on profiles and in the badge directory
-// @version 0.5.2
+// @version 0.5.3
 // @author iFlex0x, wolfieeeeeeee
 // @warning Downloads the public badge directory from Equibadges (badges.equicord.org)
 
 const API = "https://badges.equicord.org/users";
-const TTL = 15 * 60 * 1000;
+const TTL = 60 * 60 * 1000;
 const RETRY_DELAY = 30 * 1000;
 const BADGE_ID_BASE = 900_000;
 
@@ -30,7 +30,7 @@ let refreshAt = 0;
 let pending: Promise<void> | undefined;
 
 const providerNames = new Map(Object.entries({
-  aliucord: "Aliucord", badgevault: "BadgeVault", equicord: "Equicord",
+  aliucord: "Aliucord", equicord: "Equicord",
   nekocord: "Nekocord", raincord: "Raincord", replugged: "Replugged",
   reviewdb: "ReviewDB", vencord: "Vencord", enmity: "Enmity",
   velocity: "Velocity", aero: "Aero",
@@ -100,7 +100,7 @@ function parseBadges(entries: unknown): Badge[] {
     if (!isRecord(entry) || typeof entry.mod !== "string" ||
       typeof entry.badge !== "string" || typeof entry.tooltip !== "string") continue;
     const mod = entry.mod.trim().toLowerCase();
-    if (!mod || mod === "discord") continue;
+    if (!mod || mod === "discord" || mod === "badgevault") continue;
     const source = providerNames.get(mod) ?? entry.mod.trim();
     const uri = entry.badge.trim();
     const name = entry.tooltip.trim();
@@ -133,7 +133,7 @@ async function badgesFor(userId: string): Promise<Badge[]> {
 }
 
 function badgeLabel({ source, name }: Badge): string {
-  return settings.showPrefix && source !== "BadgeVault" && !name.toLowerCase().startsWith(source.toLowerCase() + " ")
+  return settings.showPrefix && !name.toLowerCase().startsWith(source.toLowerCase() + " ")
     ? `${source} ${name}`
     : name;
 }
