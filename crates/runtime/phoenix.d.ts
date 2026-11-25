@@ -1056,7 +1056,7 @@ declare namespace Phoenix {
     json<T = unknown>(): T | null;
   }
 
-  type ResponseHookResult = { body: string | object } | void;
+  type ResponseHookResult = { status?: number; body?: string | object } | void;
 
   interface Discord {
     /// Opens Discord's own authorize screen for an OAuth2 application. Once the user taps
@@ -1073,8 +1073,9 @@ declare namespace Phoenix {
       handler: (req: InterceptedRequest) => RequestHookResult
     ): Remover;
     /// Intercepts incoming Discord API responses matching `filter` (evaluated in Rust so
-    /// non-matching replies never enter JS). May return `{ body }` synchronously or as a Promise;
-    /// runs off Phoenix's UI thread with a 4s fallback to the original reply.
+    /// non-matching replies never enter JS). May return `{ body }` or `{ status, body }` to
+    /// change the status too, synchronously or as a Promise; runs off Phoenix's UI thread with a
+    /// 4s fallback to the original reply.
     onResponse(
       filter: RequestFilter,
       handler: (res: InterceptedResponse) => ResponseHookResult | Promise<ResponseHookResult>

@@ -337,7 +337,8 @@ pub fn filter(bytes: &[u8]) -> Action {
 /// then re-dispatches the `@http` frame with the body they return.
 fn redispatch(in_flight: InFlight, status: i32, frame: Vec<u8>, body: Vec<u8>) {
    let head = frame.len().saturating_sub(body.len());
-   let body = run_response_hooks(in_flight, status, body);
+   // The status stays whatever the host frame says: mobile rewrites bodies only.
+   let (_, body) = run_response_hooks(in_flight, status, body);
    let mut out = frame;
    out.truncate(head);
    out.extend_from_slice(&body);

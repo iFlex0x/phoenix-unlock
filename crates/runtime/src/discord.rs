@@ -240,12 +240,12 @@ pub fn take_response(id: u64) -> Option<InFlight> {
    in_flight
 }
 
-/// Runs `in_flight`'s `onResponse` hooks on `body` and returns the body to
-/// deliver, the original when they take longer than 4 seconds. Blocks.
+/// Runs `in_flight`'s `onResponse` hooks on `body` and returns the status and
+/// body to deliver, the originals when they take longer than 4 seconds. Blocks.
 #[must_use]
-pub fn run_response_hooks(in_flight: InFlight, status: i32, body: Vec<u8>) -> Vec<u8> {
+pub fn run_response_hooks(in_flight: InFlight, status: i32, body: Vec<u8>) -> (i32, Vec<u8>) {
    let original = body.clone();
-   let (sender, receiver) = mpsc::channel::<Vec<u8>>();
+   let (sender, receiver) = mpsc::channel::<(i32, Vec<u8>)>();
    crate::intercept_response(
       in_flight.hooks,
       in_flight.method.clone(),
@@ -262,7 +262,7 @@ pub fn run_response_hooks(in_flight: InFlight, status: i32, body: Vec<u8>) -> Ve
             in_flight.method,
             in_flight.path
          );
-         original
+         (status, original)
       })
 }
 

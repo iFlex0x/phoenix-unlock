@@ -239,19 +239,20 @@ pub fn intercept_request(
 }
 
 /// Runs matching `phoenix.discord.onResponse` hooks (sync or async) on an
-/// incoming Discord API reply and delivers the final body through `done`.
+/// incoming Discord API reply and delivers the final status and body through
+/// `done`.
 pub fn intercept_response(
    matched: Vec<u64>,
    method: String,
    path: String,
    status: i32,
    body: Vec<u8>,
-   done: std::sync::mpsc::Sender<Vec<u8>>,
+   done: std::sync::mpsc::Sender<(i32, Vec<u8>)>,
 ) {
    if let Some(engine) = engine() {
       engine.intercept_response(matched, method, path, status, body, done);
    } else {
-      let _ = done.send(body);
+      let _ = done.send((status, body));
    }
 }
 

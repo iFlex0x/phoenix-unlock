@@ -113,7 +113,7 @@ impl Engine {
       path: String,
       status: i32,
       body: Vec<u8>,
-      done: Sender<Vec<u8>>,
+      done: Sender<(i32, Vec<u8>)>,
    ) {
       let pending = Pending {
          remaining: matched,
@@ -153,6 +153,15 @@ fn extract_hook_body<'js>(ctx: &Ctx<'js>, value: &Value<'js>) -> Option<Vec<u8>>
       .map(String::into_bytes)
 }
 
+/// Extracts a replacement status from `{ status: number }` returned by
+/// `onResponse`: lets a hook turn a Discord 404 into a 200 with a body of its
+/// own. Out-of-range values leave the reply's status alone.
+fn extract_hook_status(value: &Value<'_>) -> Option<i32> {
+   let status = value.as_object()?.get::<_, Value<'_>>("status").ok()?;
+   let status = i32::try_from(status.as_int()?).ok()?;
+   (100..=599).contains(&status).then_some(status)
+}
+
 /// What the rest of a response chain needs. A promise's fulfil and reject
 /// handlers share one, and whichever runs first takes it.
 struct Pending {
@@ -161,7 +170,7 @@ struct Pending {
    path:      String,
    status:    i32,
    body:      Vec<u8>,
-   done:      Sender<Vec<u8>>,
+   done:      Sender<(i32, Vec<u8>)>,
 }
 
 fn take_pending(shared: &Mutex<Option<Pending>>) -> Option<Pending> {
@@ -204,6 +213,9 @@ fn run_response_chain<'js>(ctx: &Ctx<'js>, mut pending: Pending) {
          if let Some(next_body) = extract_hook_body(ctx, &result) {
             pending.body = next_body;
          }
+         if let Some(next_status) = extract_hook_status(&result) {
+            pending.status = next_status;
+         }
          continue;
       };
 
@@ -215,6 +227,9 @@ fn run_response_chain<'js>(ctx: &Ctx<'js>, mut pending: Pending) {
          };
          if let Some(next_body) = extract_hook_body(value.ctx(), &value) {
             rest.body = next_body;
+         }
+         if let Some(next_status) = extract_hook_status(&value) {
+            rest.status = next_status;
          }
          run_response_chain(value.ctx(), rest);
       });
@@ -238,7 +253,7 @@ fn run_response_chain<'js>(ctx: &Ctx<'js>, mut pending: Pending) {
       }
       return;
    }
-   let _ = pending.done.send(pending.body);
+   let _ = pending.done.send((pending.status, pending.body));
 }
 
 pub fn add_discord_hooks<'js>(

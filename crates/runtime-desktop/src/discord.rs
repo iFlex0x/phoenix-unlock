@@ -616,7 +616,11 @@ unsafe fn poll_detour(future: *mut c_void, cx: *mut c_void) -> RawPollResult {
             unsafe { slice::from_raw_parts(result.body.ptr, result.body.len) }.to_vec()
          };
          let orig_len = old_body.len();
-         let new_body = run_response_hooks(in_flight, i32::from(result.status), old_body);
+         let (new_status, new_body) =
+            run_response_hooks(in_flight, i32::from(result.status), old_body);
+         if let Ok(status) = u16::try_from(new_status) {
+            result.status = status;
+         }
          // SAFETY: `result.body` is owned by the Ready response being returned.
          unsafe {
             replace_host_vec(&mut result.body, orig_len, &new_body, installed);
