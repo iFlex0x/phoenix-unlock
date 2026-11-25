@@ -138,6 +138,17 @@ async function badgesFor(userId: string): Promise<Badge[]> {
   return parseBadges(users[userId]);
 }
 
+// Team and role badges read as generic on their own ("Contributor", "Donor"),
+// so they keep the mod name. Personal badges like BadgeVault ones do not.
+const ROLE_BADGE =
+  /\b(contributor|early user|developer|dev|donor|donator|staff|team)\b/i;
+
+function displayName({ name, source }: Badge): string {
+  return ROLE_BADGE.test(name) && !name.toLowerCase().startsWith(source.toLowerCase())
+    ? `${source} ${name}`
+    : name;
+}
+
 // Serve the stored map first so the first profile after a restart is instant,
 // then refresh only when it is missing or past its TTL.
 readCache();
@@ -156,7 +167,7 @@ phoenix.discord.onResponse(
     const existing = Array.isArray(data.badges) ? data.badges : [];
     const injected = extra.map((b) => ({
       id: String(badgeId(b.uri)),
-      description: b.name,
+      description: displayName(b),
       icon: `phx_u_${toHex(b.uri)}`,
       simple_icon_url: b.uri,
     }));
@@ -181,7 +192,7 @@ phoenix.discord.onResponse(
     const existing = Array.isArray(data.badges) ? data.badges : [];
     const injected = extra.map((b) => ({
       badge_id: badgeId(b.uri),
-      name: b.name,
+      name: displayName(b),
       description: settings.showCustom ? `Badge from ${b.source}.` : "",
       ...(settings.showCustom ? { info_label: b.source } : {}),
       rarity: 5,
