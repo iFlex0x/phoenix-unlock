@@ -1074,8 +1074,8 @@ declare namespace Phoenix {
     ): Remover;
     /// Intercepts incoming Discord API responses matching `filter` (evaluated in Rust so
     /// non-matching replies never enter JS). May return `{ body }` or `{ status, body }` to
-    /// change the status too, synchronously or as a Promise; runs off Phoenix's UI thread with a
-    /// 4s fallback to the original reply.
+    /// change the status too (desktop only: mobile keeps the reply's status), synchronously or as
+    /// a Promise; runs off Phoenix's UI thread with a 4s fallback to the original reply.
     onResponse(
       filter: RequestFilter,
       handler: (res: InterceptedResponse) => ResponseHookResult | Promise<ResponseHookResult>
