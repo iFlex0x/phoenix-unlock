@@ -1,5 +1,5 @@
 // @description Shows user badges from other Discord client mods on profiles
-// @version 0.5.5
+// @version 0.5.6
 // @author iFlex0x, wolfieeeeeeee
 // @warning Fetches badges from Equibadges (badges.equicord.org)
 
@@ -7,6 +7,13 @@ const API = "https://badges.equicord.org/users";
 const TTL = 6 * 60 * 60 * 1000;
 const RETRY_DELAY = 30 * 1000;
 const BADGE_ID_BASE = 900_000;
+const CACHE_KEY = "equibadges";
+
+// Badges whose art Equibadges still serves in its old form, keyed mod:name.
+const ART_OVERRIDES: Record<string, string> = {
+  "vencord:vencord contributor":
+    "https://cdn.discordapp.com/emojis/1562267648857997356.webp?size=128",
+};
 
 type Badge = { uri: string; name: string; source: string };
 
@@ -15,12 +22,6 @@ const settings = phoenix.settings.define({
     type: "switch",
     title: "Badge source",
     description: "Show where community badges came from in Badge Directory",
-    default: true,
-  },
-  showPrefix: {
-    type: "switch",
-    title: "Client mod as prefix",
-    description: "Show the mod name before each badge",
     default: true,
   },
   badgeVault: {
@@ -32,7 +33,6 @@ const settings = phoenix.settings.define({
 });
 
 let users: Record<string, unknown> = {};
-let loaded = false;
 let refreshAt = 0;
 let refreshing: Promise<void> | undefined;
 
@@ -90,8 +90,8 @@ function parseBadges(entries: unknown): Badge[] {
     const mod = entry.mod.trim().toLowerCase();
     if (!mod || mod === "discord" || (mod === "badgevault" && !settings.badgeVault)) continue;
     const source = providerNames.get(mod) ?? entry.mod.trim();
-    const uri = entry.badge.trim();
     const name = entry.tooltip.trim();
+    const uri = ART_OVERRIDES[`${mod}:${name.toLowerCase()}`] ?? entry.badge.trim();
     if (!name || !/^https?:\/\/[^/\s]+/i.test(uri) || seen.has(uri)) continue;
     seen.add(uri);
     badges.push({ uri, name, source });
@@ -108,8 +108,12 @@ async function refreshUsers(): Promise<void> {
       if (!isRecord(body) || !isRecord(body.users)) throw new Error("Invalid Equibadges response");
       if (!Object.keys(body.users).length) throw new Error("Empty Equibadges response");
       users = body.users;
-      loaded = true;
       refreshAt = Date.now() + TTL;
+      // Survive restarts: the bulk map takes ~7 seconds, longer than the
+      // loader's 4 second onResponse cutoff, so a warm start must not fetch.
+      try {
+        phoenix.storage.set(CACHE_KEY, { at: Date.now(), users });
+      } catch {}
     })()
       .catch(() => { refreshAt = Date.now() + RETRY_DELAY; })
       .finally(() => { refreshing = undefined; });
@@ -117,25 +121,27 @@ async function refreshUsers(): Promise<void> {
   return refreshing;
 }
 
+function readCache(): void {
+  try {
+    const cached = phoenix.storage.get<{ at?: unknown; users?: unknown }>(CACHE_KEY);
+    if (!cached || typeof cached.at !== "number" || !isRecord(cached.users)) return;
+    if (!Object.keys(cached.users).length) return;
+    users = cached.users;
+    refreshAt = cached.at + TTL;
+  } catch {}
+}
+
 async function badgesFor(userId: string): Promise<Badge[]> {
-  if (Date.now() >= refreshAt) {
-    const refresh = refreshUsers();
-    // Serve the old map while a refresh runs: only the first load may wait,
-    // so a profile hook stays under the loader's 4 second cutoff.
-    if (!loaded) await refresh;
-  }
+  // Never hold a profile hook for the bulk download: the cached map covers
+  // every restart after the first, and a cold start catches up next open.
+  if (Date.now() >= refreshAt) void refreshUsers();
   return parseBadges(users[userId]);
 }
 
-// Warm the map at plugin load so the first profile does not pay for the 1.9 MB
-// download. A failure leaves `loaded` false and retries after RETRY_DELAY.
-void refreshUsers();
-
-function badgeLabel({ source, name }: Badge): string {
-  return settings.showPrefix && !name.toLowerCase().startsWith(source.toLowerCase() + " ")
-    ? `${source} ${name}`
-    : name;
-}
+// Serve the stored map first so the first profile after a restart is instant,
+// then refresh only when it is missing or past its TTL.
+readCache();
+if (Date.now() >= refreshAt) void refreshUsers();
 
 phoenix.discord.onResponse(
   { method: "GET", pathPrefix: "/users/", pathSuffix: "/profile" },
@@ -144,13 +150,13 @@ phoenix.discord.onResponse(
     const userId = await userIdFromPath(res.path);
     if (!userId) return;
     const data = res.json<Record<string, unknown>>();
-    if (!data || typeof data !== "object") return;
+    if (!isRecord(data)) return;
     const extra = await badgesFor(userId);
     if (!extra.length) return;
     const existing = Array.isArray(data.badges) ? data.badges : [];
     const injected = extra.map((b) => ({
       id: String(badgeId(b.uri)),
-      description: badgeLabel(b),
+      description: b.name,
       icon: `phx_u_${toHex(b.uri)}`,
       simple_icon_url: b.uri,
     }));
@@ -162,17 +168,20 @@ phoenix.discord.onResponse(
 phoenix.discord.onResponse(
   { method: "GET", pathPrefix: "/users/", pathSuffix: "/badges" },
   async (res) => {
-    if (res.status < 200 || res.status >= 300) return;
+    // Discord 404s this endpoint when the user has no badges of its own, which
+    // leaves the badge window erroring. Give it a 200 with ours instead.
+    const noBadges = res.status === 404;
+    if (!noBadges && (res.status < 200 || res.status >= 300)) return;
     const userId = await userIdFromPath(res.path);
     if (!userId) return;
-    const data = res.json<Record<string, unknown>>();
-    if (!data || typeof data !== "object") return;
     const extra = await badgesFor(userId);
     if (!extra.length) return;
+    const data = noBadges ? {} : res.json<Record<string, unknown>>();
+    if (!isRecord(data)) return;
     const existing = Array.isArray(data.badges) ? data.badges : [];
     const injected = extra.map((b) => ({
       badge_id: badgeId(b.uri),
-      name: badgeLabel(b),
+      name: b.name,
       description: settings.showCustom ? `Badge from ${b.source}.` : "",
       ...(settings.showCustom ? { info_label: b.source } : {}),
       rarity: 5,
@@ -185,6 +194,6 @@ phoenix.discord.onResponse(
       hidden: false,
     }));
     data.badges = [...injected, ...existing];
-    return { body: data };
+    return noBadges ? { status: 200, body: data } : { body: data };
   }
 );
